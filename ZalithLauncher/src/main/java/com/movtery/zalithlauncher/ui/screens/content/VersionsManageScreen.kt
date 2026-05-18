@@ -20,6 +20,9 @@ package com.movtery.zalithlauncher.ui.screens.content
 
 import android.content.Context
 import android.os.Environment
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,12 +34,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,7 +57,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -61,6 +78,9 @@ import com.movtery.zalithlauncher.game.version.installed.VersionComparator
 import com.movtery.zalithlauncher.game.version.installed.VersionType
 import com.movtery.zalithlauncher.game.version.installed.VersionsManager
 import com.movtery.zalithlauncher.game.version.installed.cleanup.GameAssetCleaner
+import com.movtery.zalithlauncher.setting.AllSettings
+import com.movtery.zalithlauncher.setting.enums.ViewMode
+import com.movtery.zalithlauncher.setting.enums.next
 import com.movtery.zalithlauncher.ui.activities.MainActivity
 import com.movtery.zalithlauncher.ui.base.BaseScreen
 import com.movtery.zalithlauncher.ui.components.BackgroundCard
@@ -73,14 +93,19 @@ import com.movtery.zalithlauncher.ui.components.ScalingLabel
 import com.movtery.zalithlauncher.ui.components.fadeEdge
 import com.movtery.zalithlauncher.ui.screens.NormalNavKey
 import com.movtery.zalithlauncher.ui.screens.content.elements.CleanupOperation
+import com.movtery.zalithlauncher.ui.screens.content.elements.CommonVersionInfoLayout
 import com.movtery.zalithlauncher.ui.screens.content.elements.GamePathItemLayout
 import com.movtery.zalithlauncher.ui.screens.content.elements.GamePathOperation
 import com.movtery.zalithlauncher.ui.screens.content.elements.VersionCategory
 import com.movtery.zalithlauncher.ui.screens.content.elements.VersionCategoryItem
-import com.movtery.zalithlauncher.ui.screens.content.elements.VersionItemLayout
 import com.movtery.zalithlauncher.ui.screens.content.elements.VersionsOperation
+import com.movtery.zalithlauncher.ui.theme.itemColor
+import com.movtery.zalithlauncher.ui.theme.onItemColor
+import com.movtery.zalithlauncher.utils.animation.getAnimateTween
 import com.movtery.zalithlauncher.utils.animation.swapAnimateDpAsState
 import com.movtery.zalithlauncher.utils.checkStoragePermissions
+import com.movtery.zalithlauncher.utils.logging.Logger.lError
+import com.movtery.zalithlauncher.utils.string.getMessageOrToString
 import com.movtery.zalithlauncher.viewmodel.ErrorViewModel
 import com.movtery.zalithlauncher.viewmodel.EventViewModel
 import com.movtery.zalithlauncher.viewmodel.ScreenBackStackViewModel
@@ -301,6 +326,9 @@ fun VersionsManageScreen(
                     .weight(2.5f)
             )
 
+            val saveCfgFailedText = stringResource(R.string.versions_config_failed_to_save)
+            val layoutType = AllSettings.versionLayout
+
             VersionsLayout(
                 isVisible = isVisible,
                 isRefreshing = isRefreshing,
@@ -308,6 +336,8 @@ fun VersionsManageScreen(
                 currentVersion = currentVersion,
                 versionCategory = viewModel.versionCategory,
                 onCategoryChange = { viewModel.changeCategory(it) },
+                layoutType = layoutType.state,
+                onLayoutTypeChanged = { layoutType.save(it) },
                 allVersionsCount = viewModel.allVersionsCount,
                 vanillaVersionsCount = viewModel.vanillaVersionsCount,
                 modloaderVersionsCount = viewModel.modloaderVersionsCount,
@@ -322,8 +352,21 @@ fun VersionsManageScreen(
                 onRefresh = {
                     viewModel.startRefreshVersions()
                 },
-                onVersionPinned = {
-                    viewModel.resortVersions()
+                onVersionPin = { version ->
+                    val currentValue = version.pinnedState
+                    runCatching {
+                        version.setPinnedAndSave(!currentValue)
+                    }.onFailure { e ->
+                        lError("Failed to save version config!", e)
+                        submitError(
+                            ErrorViewModel.ThrowableMessage(
+                                title = saveCfgFailedText,
+                                message = e.getMessageOrToString()
+                            )
+                        )
+                    }.onSuccess {
+                        viewModel.resortVersions()
+                    }
                 },
                 onInstall = {
                     backScreenViewModel.navigateToDownload()
@@ -456,6 +499,8 @@ private fun VersionsLayout(
     currentVersion: Version?,
     versionCategory: VersionCategory,
     onCategoryChange: (VersionCategory) -> Unit,
+    layoutType: ViewMode,
+    onLayoutTypeChanged: (ViewMode) -> Unit,
     allVersionsCount: Int,
     vanillaVersionsCount: Int,
     modloaderVersionsCount: Int,
@@ -463,7 +508,7 @@ private fun VersionsLayout(
     navigateToExport: (Version) -> Unit,
     submitError: (ErrorViewModel.ThrowableMessage) -> Unit,
     onRefresh: () -> Unit,
-    onVersionPinned: () -> Unit,
+    onVersionPin: (Version) -> Unit,
     onInstall: () -> Unit,
 ) {
     val surfaceYOffset by swapAnimateDpAsState(
@@ -492,16 +537,9 @@ private fun VersionsLayout(
 
             Column(modifier = Modifier.fillMaxSize()) {
                 CardTitleLayout {
-                    val scrollState = rememberScrollState()
                     Row(
                         modifier = Modifier
-                            .fadeEdge(
-                                state = scrollState,
-                                length = 32.dp,
-                                direction = EdgeDirection.Horizontal
-                            )
                             .fillMaxWidth()
-                            .horizontalScroll(state = scrollState)
                             .padding(all = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -519,63 +557,76 @@ private fun VersionsLayout(
                             text = stringResource(R.string.versions_manage_install_new),
                         )
                         //版本分类
-                        VersionCategoryItem(
-                            value = VersionCategory.ALL,
-                            versionsCount = allVersionsCount,
-                            selected = versionCategory == VersionCategory.ALL,
-                            onClick = { onCategoryChange(VersionCategory.ALL) }
-                        )
-                        VersionCategoryItem(
-                            value = VersionCategory.VANILLA,
-                            versionsCount = vanillaVersionsCount,
-                            selected = versionCategory == VersionCategory.VANILLA,
-                            onClick = { onCategoryChange(VersionCategory.VANILLA) }
-                        )
-                        VersionCategoryItem(
-                            value = VersionCategory.MODLOADER,
-                            versionsCount = modloaderVersionsCount,
-                            selected = versionCategory == VersionCategory.MODLOADER,
-                            onClick = { onCategoryChange(VersionCategory.MODLOADER) }
-                        )
+                        val scrollState = rememberScrollState()
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fadeEdge(
+                                    state = scrollState,
+                                    length = 32.dp,
+                                    direction = EdgeDirection.Horizontal
+                                )
+                                .horizontalScroll(state = scrollState),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            VersionCategoryItem(
+                                value = VersionCategory.ALL,
+                                versionsCount = allVersionsCount,
+                                selected = versionCategory == VersionCategory.ALL,
+                                onClick = { onCategoryChange(VersionCategory.ALL) }
+                            )
+                            VersionCategoryItem(
+                                value = VersionCategory.VANILLA,
+                                versionsCount = vanillaVersionsCount,
+                                selected = versionCategory == VersionCategory.VANILLA,
+                                onClick = { onCategoryChange(VersionCategory.VANILLA) }
+                            )
+                            VersionCategoryItem(
+                                value = VersionCategory.MODLOADER,
+                                versionsCount = modloaderVersionsCount,
+                                selected = versionCategory == VersionCategory.MODLOADER,
+                                onClick = { onCategoryChange(VersionCategory.MODLOADER) }
+                            )
+                        }
+                        //视图模式切换
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable {
+                                    onLayoutTypeChanged(layoutType.next)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Crossfade(
+                                targetState = layoutType
+                            ) { type ->
+                                Icon(
+                                    modifier = Modifier.padding(all = 8.dp),
+                                    painter = when (type) {
+                                        ViewMode.List -> painterResource(R.drawable.ic_list)
+                                        ViewMode.Card -> painterResource(R.drawable.ic_image_outlined)
+                                    },
+                                    contentDescription = null
+                                )
+                            }
+                        }
                     }
                 }
 
                 if (versions.isNotEmpty()) {
-                    LazyColumn(
+                    VersionsListLayout(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .clipToBounds(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        items(versions, key = { it.toString() }) { version ->
-                            VersionItemLayout(
-                                version = version,
-                                selected = version == currentVersion,
-                                submitError = submitError,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp)
-                                    .animateItem(),
-                                onSelected = {
-                                    if (version.isValid() && version != currentVersion) {
-                                        VersionsManager.saveCurrentVersion(version.getVersionName())
-                                    } else {
-                                        //不允许选择无效版本
-                                        versionsOperation = VersionsOperation.InvalidDelete(version)
-                                    }
-                                },
-                                onSettingsClick = {
-                                    navigateToVersions(version)
-                                },
-                                onRenameClick = { versionsOperation = VersionsOperation.Rename(version) },
-                                onCopyClick = { versionsOperation = VersionsOperation.Copy(version) },
-                                onExportClick = { navigateToExport(version) },
-                                onDeleteClick = { versionsOperation = VersionsOperation.Delete(version) },
-                                onPinned = onVersionPinned
-                            )
-                        }
-                    }
+                        versions = versions,
+                        currentVersion = currentVersion,
+                        changeOperation = { versionsOperation = it },
+                        navigateToVersions = navigateToVersions,
+                        navigateToExport = navigateToExport,
+                        onVersionPin = onVersionPin,
+                    )
                 } else {
                     Box(
                         modifier = Modifier
@@ -590,5 +641,238 @@ private fun VersionsLayout(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VersionsListLayout(
+    versions: List<Version>,
+    currentVersion: Version?,
+    changeOperation: (VersionsOperation) -> Unit,
+    navigateToVersions: (Version) -> Unit,
+    navigateToExport: (Version) -> Unit,
+    onVersionPin: (Version) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        items(versions, key = { it.toString() }) { version ->
+            VersionListItemLayout(
+                version = version,
+                selected = version == currentVersion,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp)
+                    .animateItem(),
+                onSelected = {
+                    if (version.isValid() && version != currentVersion) {
+                        VersionsManager.saveCurrentVersion(version.getVersionName())
+                    } else {
+                        //不允许选择无效版本
+                        changeOperation(VersionsOperation.InvalidDelete(version))
+                    }
+                },
+                onSettingsClick = {
+                    navigateToVersions(version)
+                },
+                onRenameClick = { changeOperation(VersionsOperation.Rename(version)) },
+                onCopyClick = { changeOperation(VersionsOperation.Copy(version)) },
+                onExportClick = { navigateToExport(version) },
+                onDeleteClick = { changeOperation(VersionsOperation.Delete(version)) },
+                onPinClick = {
+                    onVersionPin(version)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun VersionListItemLayout(
+    version: Version,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    color: Color = itemColor(),
+    contentColor: Color = onItemColor(),
+    onSelected: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
+    onRenameClick: () -> Unit = {},
+    onCopyClick: () -> Unit = {},
+    onExportClick: () -> Unit = {},
+    onDeleteClick: () -> Unit = {},
+    onPinClick: () -> Unit = {}
+) {
+    val scale = remember { Animatable(initialValue = 0.95f) }
+    LaunchedEffect(Unit) {
+        scale.animateTo(targetValue = 1f, animationSpec = getAnimateTween())
+    }
+    Surface(
+        modifier = modifier.graphicsLayer(scaleY = scale.value, scaleX = scale.value),
+        color = color,
+        contentColor = contentColor,
+        shape = MaterialTheme.shapes.large,
+        onClick = {
+            if (selected) return@Surface
+            onSelected()
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape = MaterialTheme.shapes.large)
+                .padding(all = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = {
+                    if (selected) return@RadioButton
+                    onSelected()
+                }
+            )
+            CommonVersionInfoLayout(
+                modifier = Modifier.weight(1f),
+                version = version
+            )
+
+            VersionPinButton(
+                version = version,
+                onPinClick = onPinClick
+            )
+
+            IconButton(
+                onClick = onSettingsClick,
+                enabled = version.isValid()
+            ) {
+                Icon(
+                    modifier = Modifier.size(24.dp),
+                    painter = painterResource(R.drawable.ic_settings_filled),
+                    contentDescription = stringResource(R.string.versions_manage_settings)
+                )
+            }
+
+            Row {
+                var menuExpanded by remember { mutableStateOf(false) }
+
+                IconButton(onClick = { menuExpanded = !menuExpanded }) {
+                    Icon(
+                        modifier = Modifier.size(24.dp),
+                        painter = painterResource(R.drawable.ic_more_horiz),
+                        contentDescription = stringResource(R.string.generic_more)
+                    )
+                }
+
+                VersionMoreMenu(
+                    menuExpanded = menuExpanded,
+                    onExpandChange = { menuExpanded = it },
+                    onRenameClick = onRenameClick,
+                    onCopyClick = onCopyClick,
+                    onExportClick = onExportClick,
+                    onDeleteClick = onDeleteClick
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VersionPinButton(
+    version: Version,
+    onPinClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onPinClick,
+        enabled = version.isValid()
+    ) {
+        Crossfade(
+            targetState = version.pinnedState
+        ) { pinned ->
+            val icon = if (pinned) {
+                painterResource(R.drawable.ic_pinned_filled)
+            } else {
+                painterResource(R.drawable.ic_pinned_outlined)
+            }
+            Icon(
+                modifier = Modifier.rotate(45.0f),
+                painter = icon,
+                contentDescription = stringResource(R.string.versions_manage_pin)
+            )
+        }
+    }
+}
+
+@Composable
+private fun VersionMoreMenu(
+    menuExpanded: Boolean,
+    onExpandChange: (Boolean) -> Unit,
+    onRenameClick: () -> Unit,
+    onCopyClick: () -> Unit,
+    onExportClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = menuExpanded,
+        shape = MaterialTheme.shapes.large,
+        shadowElevation = 3.dp,
+        onDismissRequest = { onExpandChange(false) }
+    ) {
+        DropdownMenuItem(
+            text = { Text(text = stringResource(R.string.generic_rename)) },
+            leadingIcon = {
+                Icon(
+                    modifier = Modifier.size(20.dp),
+                    painter = painterResource(R.drawable.ic_edit_filled),
+                    contentDescription = stringResource(R.string.generic_rename)
+                )
+            },
+            onClick = {
+                onRenameClick()
+                onExpandChange(false)
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(text = stringResource(R.string.generic_copy)) },
+            leadingIcon = {
+                Icon(
+                    modifier = Modifier.size(20.dp),
+                    painter = painterResource(R.drawable.ic_file_copy_filled),
+                    contentDescription = stringResource(R.string.generic_copy)
+                )
+            },
+            onClick = {
+                onCopyClick()
+                onExpandChange(false)
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(text = stringResource(R.string.versions_export)) },
+            leadingIcon = {
+                Icon(
+                    modifier = Modifier.size(20.dp),
+                    painter = painterResource(R.drawable.ic_folder_zip_filled),
+                    contentDescription = stringResource(R.string.versions_export)
+                )
+            },
+            onClick = {
+                onExportClick()
+                onExpandChange(false)
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(text = stringResource(R.string.generic_delete)) },
+            leadingIcon = {
+                Icon(
+                    modifier = Modifier.size(20.dp),
+                    painter = painterResource(R.drawable.ic_delete_filled),
+                    contentDescription = stringResource(R.string.generic_delete)
+                )
+            },
+            onClick = {
+                onDeleteClick()
+                onExpandChange(false)
+            }
+        )
     }
 }

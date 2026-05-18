@@ -18,17 +18,13 @@
 
 package com.movtery.zalithlauncher.ui.screens.content.elements
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -44,11 +40,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -57,11 +50,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -91,9 +81,6 @@ import com.movtery.zalithlauncher.ui.components.SimpleEditDialog
 import com.movtery.zalithlauncher.ui.components.SimpleTaskDialog
 import com.movtery.zalithlauncher.ui.components.TextRailItem
 import com.movtery.zalithlauncher.ui.components.fadeEdge
-import com.movtery.zalithlauncher.ui.theme.itemColor
-import com.movtery.zalithlauncher.ui.theme.onItemColor
-import com.movtery.zalithlauncher.utils.animation.getAnimateTween
 import com.movtery.zalithlauncher.utils.logging.Logger.lError
 import com.movtery.zalithlauncher.utils.string.getMessageOrToString
 import com.movtery.zalithlauncher.utils.string.isNotEmptyOrBlank
@@ -656,183 +643,6 @@ fun CleanupOperation(
                 text = stringResource(R.string.versions_manage_cleanup_success, operation.count, operation.size)
             ) {
                 changeOperation(CleanupOperation.None)
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun VersionItemLayout(
-    version: Version,
-    selected: Boolean,
-    submitError: (ErrorViewModel.ThrowableMessage) -> Unit,
-    modifier: Modifier = Modifier,
-    color: Color = itemColor(),
-    contentColor: Color = onItemColor(),
-    onSelected: () -> Unit = {},
-    onSettingsClick: () -> Unit = {},
-    onRenameClick: () -> Unit = {},
-    onCopyClick: () -> Unit = {},
-    onExportClick: () -> Unit = {},
-    onDeleteClick: () -> Unit = {},
-    onPinned: () -> Unit = {}
-) {
-    val context = LocalContext.current
-
-    val scale = remember { Animatable(initialValue = 0.95f) }
-    LaunchedEffect(Unit) {
-        scale.animateTo(targetValue = 1f, animationSpec = getAnimateTween())
-    }
-    Surface(
-        modifier = modifier.graphicsLayer(scaleY = scale.value, scaleX = scale.value),
-        color = color,
-        contentColor = contentColor,
-        shape = MaterialTheme.shapes.large,
-        onClick = {
-            if (selected) return@Surface
-            onSelected()
-        }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(shape = MaterialTheme.shapes.large)
-                .padding(all = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = selected,
-                onClick = {
-                    if (selected) return@RadioButton
-                    onSelected()
-                }
-            )
-            CommonVersionInfoLayout(
-                modifier = Modifier.weight(1f),
-                version = version
-            )
-
-            IconButton(
-                onClick = {
-                    val currentValue = version.pinnedState
-                    runCatching {
-                        version.setPinnedAndSave(!currentValue)
-                    }.onFailure { e ->
-                        lError("Failed to save version config!", e)
-                        submitError(
-                            ErrorViewModel.ThrowableMessage(
-                                title = context.getString(R.string.versions_config_failed_to_save),
-                                message = e.getMessageOrToString()
-                            )
-                        )
-                    }.onSuccess {
-                        onPinned()
-                    }
-                },
-                enabled = version.isValid()
-            ) {
-                Crossfade(
-                    targetState = version.pinnedState
-                ) { pinned ->
-                    val icon = if (pinned) {
-                        painterResource(R.drawable.ic_pinned_filled)
-                    } else {
-                        painterResource(R.drawable.ic_pinned_outlined)
-                    }
-                    Icon(
-                        modifier = Modifier.rotate(45.0f),
-                        painter = icon,
-                        contentDescription = stringResource(R.string.versions_manage_pin)
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = onSettingsClick,
-                enabled = version.isValid()
-            ) {
-                Icon(
-                    modifier = Modifier.size(24.dp),
-                    painter = painterResource(R.drawable.ic_settings_filled),
-                    contentDescription = stringResource(R.string.versions_manage_settings)
-                )
-            }
-
-            Row {
-                var menuExpanded by remember { mutableStateOf(false) }
-
-                IconButton(onClick = { menuExpanded = !menuExpanded }) {
-                    Icon(
-                        modifier = Modifier.size(24.dp),
-                        painter = painterResource(R.drawable.ic_more_horiz),
-                        contentDescription = stringResource(R.string.generic_more)
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
-                    onDismissRequest = { menuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.generic_rename)) },
-                        leadingIcon = {
-                            Icon(
-                                modifier = Modifier.size(20.dp),
-                                painter = painterResource(R.drawable.ic_edit_filled),
-                                contentDescription = stringResource(R.string.generic_rename)
-                            )
-                        },
-                        onClick = {
-                            onRenameClick()
-                            menuExpanded = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.generic_copy)) },
-                        leadingIcon = {
-                            Icon(
-                                modifier = Modifier.size(20.dp),
-                                painter = painterResource(R.drawable.ic_file_copy_filled),
-                                contentDescription = stringResource(R.string.generic_copy)
-                            )
-                        },
-                        onClick = {
-                            onCopyClick()
-                            menuExpanded = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.versions_export)) },
-                        leadingIcon = {
-                            Icon(
-                                modifier = Modifier.size(20.dp),
-                                painter = painterResource(R.drawable.ic_folder_zip_filled),
-                                contentDescription = stringResource(R.string.versions_export)
-                            )
-                        },
-                        onClick = {
-                            onExportClick()
-                            menuExpanded = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(R.string.generic_delete)) },
-                        leadingIcon = {
-                            Icon(
-                                modifier = Modifier.size(20.dp),
-                                painter = painterResource(R.drawable.ic_delete_filled),
-                                contentDescription = stringResource(R.string.generic_delete)
-                            )
-                        },
-                        onClick = {
-                            onDeleteClick()
-                            menuExpanded = false
-                        }
-                    )
-                }
             }
         }
     }
